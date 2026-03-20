@@ -1,0 +1,214 @@
+# Supply Chain Disruption Intelligence — Full Stack
+# Usage: docker compose up -d
+# Verify: docker compose ps
+
+services:
+  # --- HDFS ---
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: always
+    ports:
+      - "9870:9870"   # Web UI
+      - "9000:9000"   # HDFS RPC
+    environment:
+      CLUSTER_NAME: supply-chain
+      CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+      CORE_CONF_hadoop_http_staticuser_user: root
+      HDFS_CONF_dfs_replication: 2
+      HDFS_CONF_dfs_namenode_datanode_registration_ip___hostname___check: "false"
+    volumes:
+      - namenode_data:/hadoop/dfs/name
+    networks:
+      - scnet
+
+  datanode-1:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode-1
+    restart: always
+    environment:
+      CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+      HDFS_CONF_dfs_replication: 2
+      SERVICE_PRECONDITION: "namenode:9870"
+    volumes:
+      - datanode1_data:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    networks:
+      - scnet
+
+  datanode-2:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode-2
+    restart: always
+    environment:
+      CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+      HDFS_CONF_dfs_replication: 2
+      SERVICE_PRECONDITION: "namenode:9870"
+    volumes:
+      - datanode2_data:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    networks:
+      - scnet
+
+  # --- Spark (Apache official image with Python) ---
+  # Official image uses /opt/spark; no SPARK_MODE env var like bitnami.
+  # We start master/worker daemons via entrypoint scripts.
+  spark-master:
+    image: apache/spark:3.5.3-python3
+    container_name: spark-master
+    user: root
+    ports:
+      - "8080:8080"   # Spark Master UI
+      - "7077:7077"   # Spark master port
+      - "4040:4040"   # Spark job UI
+    command: >
+      bash -c "
+        pip install numpy &&
+        /opt/spark/sbin/start-master.sh --host spark-master --port 7077 --webui-port 8080 &&
+        tail -f /opt/spark/logs/*master*
+      "
+    environment:
+      SPARK_HOME: /opt/spark
+      SPARK_MASTER_HOST: spark-master
+      HADOOP_CONF_DIR: /opt/hadoop-conf
+    volumes:
+      - ./notebooks:/opt/notebooks
+      - ./scripts:/opt/scripts
+      - ./data:/opt/data
+      - ./config/core-site.xml:/opt/hadoop-conf/core-site.xml
+      - ./config/core-site.xml:/opt/spark/conf/core-site.xml
+    depends_on:
+      - namenode
+    networks:
+      - scnet
+
+  spark-worker-1:
+    image: apache/spark:3.5.3-python3
+    container_name: spark-worker-1
+    user: root
+    command: >
+      bash -c "
+        pip install numpy &&
+        /opt/spark/sbin/start-worker.sh spark://spark-master:7077 --cores 2 --memory 4g &&
+        tail -f /opt/spark/logs/*worker*
+      "
+    environment:
+      SPARK_HOME: /opt/spark
+      HADOOP_CONF_DIR: /opt/hadoop-conf
+    volumes:
+      - ./config/core-site.xml:/opt/hadoop-conf/core-site.xml
+    depends_on:
+      - spark-master
+    networks:
+      - scnet
+
+  spark-worker-2:
+    image: apache/spark:3.5.3-python3
+    container_name: spark-worker-2
+    user: root
+    command: >
+      bash -c "
+        pip install numpy &&
+        /opt/spark/sbin/start-worker.sh spark://spark-master:7077 --cores 2 --memory 4g &&
+        tail -f /opt/spark/logs/*worker*
+      "
+    environment:
+      SPARK_HOME: /opt/spark
+      HADOOP_CONF_DIR: /opt/hadoop-conf
+    volumes:
+      - ./config/core-site.xml:/opt/hadoop-conf/core-site.xml
+    depends_on:
+      - spark-master
+    networks:
+      - scnet
+
+  # --- Kafka ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    restart: always
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - scnet
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    restart: always
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      - zookeeper
+    networks:
+      - scnet
+
+  # --- Hive (additional tool, not covered in class) ---
+  hive-server:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-server
+    restart: always
+    ports:
+      - "10000:10000"  # HiveServer2 JDBC
+      - "10002:10002"  # Hive Web UI
+    environment:
+      HIVE_CORE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore-db/metastore"
+      HIVE_CORE_CONF_javax_jdo_option_ConnectionDriverName: "org.postgresql.Driver"
+      HIVE_CORE_CONF_javax_jdo_option_ConnectionUserName: "hive"
+      HIVE_CORE_CONF_javax_jdo_option_ConnectionPassword: "hive"
+      CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+      SERVICE_PRECONDITION: "namenode:9870 hive-metastore-db:5432"
+    depends_on:
+      - hive-metastore-db
+      - namenode
+    networks:
+      - scnet
+
+  hive-metastore-db:
+    image: postgres:13
+    container_name: hive-metastore-db
+    restart: always
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+    volumes:
+      - hive_db:/var/lib/postgresql/data
+    networks:
+      - scnet
+
+  # --- Dashboard ---
+  streamlit:
+    image: python:3.11-slim
+    container_name: streamlit
+    ports:
+      - "8501:8501"
+    working_dir: /app
+    command: >
+      bash -c "pip install streamlit plotly pandas pyarrow folium streamlit-folium &&
+               streamlit run dashboard.py --server.address 0.0.0.0"
+    volumes:
+      - ./dashboard:/app
+      - ./data:/app/data
+    depends_on:
+      - spark-master
+    networks:
+      - scnet
+
+volumes:
+  namenode_data:
+  datanode1_data:
+  datanode2_data:
+  hive_db:
+
+networks:
+  scnet:
+    driver: bridge
