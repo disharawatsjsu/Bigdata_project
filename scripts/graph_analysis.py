@@ -41,9 +41,9 @@ spark = (
 )
 spark.sparkContext.setLogLevel("WARN")
 
-LOCAL_MODE = not os.environ.get("HADOOP_CONF_DIR")
-HDFS_BASE = "/opt/data" if LOCAL_MODE else "hdfs://namenode:9000/supply-chain"
-FEATURES_PATH = f"{HDFS_BASE}/{'parquet/' if LOCAL_MODE else ''}features"
+from config import HDFS_FEATURES
+
+FEATURES_PATH = HDFS_FEATURES
 
 
 # =============================================================================

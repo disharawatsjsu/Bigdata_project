@@ -31,6 +31,7 @@ from pyspark.ml.tuning import CrossValidator, ParamGridBuilder
 from pyspark.ml import Pipeline
 from functools import reduce
 import os
+from datetime import date
 
 spark = (
     SparkSession.builder
@@ -42,43 +43,26 @@ spark = (
 spark.sparkContext.setLogLevel("WARN")
 print(f"Spark version: {spark.version}")
 
-# Paths — adjust if running outside Docker
-GDELT_RAW = "/opt/data/gdelt"           # local CSV files
-HDFS_BASE = "hdfs://namenode:9000/supply-chain"
-HDFS_GDELT_PARQUET = f"{HDFS_BASE}/gdelt_events"
-HDFS_FEATURES = f"{HDFS_BASE}/features"
-HDFS_MODEL = f"{HDFS_BASE}/model_rf_v1"
+from config import (
+    CHOKEPOINTS,
+    COMMODITY_RAW,
+    FRED_RAW,
+    GDELT_RAW,
+    HDFS_FEATURES,
+    HDFS_GDELT_PARQUET,
+    HDFS_HOT,
+    HDFS_MODEL,
+    HDFS_WARM,
+    LOCAL_MODE,
+    WARM_COLUMNS,
+    get_tier_for_date,
+)
 
-# Fallback for local-only runs (no HDFS)
-LOCAL_MODE = not os.environ.get("HADOOP_CONF_DIR")
 if LOCAL_MODE:
-    HDFS_GDELT_PARQUET = "/opt/data/parquet/gdelt_events"
-    HDFS_FEATURES = "/opt/data/parquet/features"
-    HDFS_MODEL = "/opt/data/model_rf_v1"
     print("⚠ Running in LOCAL mode (no HDFS)")
-
-# === Tiered storage constants ===
-HDFS_HOT = "hdfs://namenode:9000/supply-chain/raw/hot"
-HDFS_WARM = "hdfs://namenode:9000/supply-chain/raw/warm"
-HOT_YEAR_CUTOFF = 2023  # year >= cutoff -> hot, else warm
-
-# Columns retained in warm tier (filtered events)
-WARM_COLUMNS = [
-    "GLOBALEVENTID", "event_date",
-    "Actor1Code", "Actor2Code",
-    "EventCode", "EventRootCode",
-    "GoldsteinScale", "NumMentions", "AvgTone",
-    "ActionGeo_Lat", "ActionGeo_Long",
-    "SOURCEURL",
-]
 
 # Supply-chain CAMEO event root codes (integers; EventRootCode is string in GDELT)
 SUPPLY_CHAIN_CAMEO = [14, 17, 18, 19, 20]
-
-if LOCAL_MODE:
-    HDFS_HOT = "/opt/data/parquet/raw/hot"
-    HDFS_WARM = "/opt/data/parquet/raw/warm"
-
 
 # =============================================================================
 # 1. GDELT SCHEMA — all 61 columns, but we only use ~15
@@ -193,16 +177,18 @@ def ingest_gdelt(raw_path: str, parquet_path: str):
     return raw_df
 
 
-def ingest_gdelt_tiered(input_path: str, year: int, month: int):
-    """Ingest one month of GDELT CSVs, routing to hot or warm tier by year.
+def ingest_gdelt_tiered(input_path: str, year: int, month: int, as_of=None):
+    """Ingest one month of GDELT CSVs, routing to hot or warm tier by rolling window.
 
-    Hot (year >= HOT_YEAR_CUTOFF): full schema preserved, partitioned write.
-    Warm (year < HOT_YEAR_CUTOFF): filter to supply-chain CAMEO + chokepoint geo,
-        project to WARM_COLUMNS only.
+    Hot: representative month start falls in hot window relative to as_of (full schema).
+    Warm / cold: same write path and projection as warm (cold logged until PR L).
 
     Returns (row_count, tier_name) for logging.
     """
     print(f"[ingest_tiered] reading {input_path} for {year}-{month:02d}")
+
+    rep_date = date(year, month, 1)
+    tier = get_tier_for_date(rep_date, as_of=as_of)
 
     base = input_path.rstrip("/")
     csv_path = base if base.lower().endswith(".csv") else f"{base}/*.CSV"
@@ -220,12 +206,18 @@ def ingest_gdelt_tiered(input_path: str, year: int, month: int):
         F.to_date(F.col("SQLDATE").cast("string"), "yyyyMMdd")
     )
 
-    if year >= HOT_YEAR_CUTOFF:
+    if tier == "hot":
         out_path = f"{HDFS_HOT}/year={year}/month={month:02d}"
         cnt = df.count()
         df.write.mode("overwrite").parquet(out_path)
         print(f"[ingest_tiered] HOT: wrote {cnt:,} rows to {out_path}")
         return cnt, "hot"
+
+    if tier == "cold":
+        print(
+            f"[ingest_gdelt_tiered] WARNING: tier=cold for {year}-{month:02d}; "
+            f"using warm-tier path until PR L adds cold aggregates"
+        )
 
     cameo_filter = F.col("EventRootCode").cast("int").isin(SUPPLY_CHAIN_CAMEO)
     warm_df = (
@@ -251,18 +243,6 @@ def ingest_gdelt_tiered(input_path: str, year: int, month: int):
 SC_CAMEO_ROOTS = ["14", "17", "18", "19", "20"]  # protest, coerce, assault, fight, mass violence
 
 # Chokepoint bounding boxes: (lat_min, lat_max, lon_min, lon_max)
-CHOKEPOINTS = {
-    "hormuz":    (25.06, 28.06, 54.75, 57.75),
-    "suez":      (29.46, 31.46, 31.34, 33.34),
-    "red_sea":   (11.00, 17.00, 40.00, 46.00),
-    "black_sea": (41.60, 47.60, 30.50, 36.50),
-    "malacca":   (0.50,  4.50,  99.50, 103.50),
-    "panama":    (8.58,  9.58, -80.18, -79.18),
-    "taiwan":    (23.00, 26.00, 118.00, 121.00),
-    "chile":     (-26.50, -20.50, -72.50, -66.50),
-}
-
-
 def _in_any_chokepoint_bbox(lat_col, lon_col):
     """True if (lat, lon) falls in ANY chokepoint bbox. Uses CHOKEPOINTS tuple layout."""
     conditions = []
@@ -679,8 +659,8 @@ if __name__ == "__main__":
     # Step 3: Features
     features_df = build_features(
         clean_df,
-        commodity_path="hdfs://namenode:9000/opt/data/commodities/commodity_prices.csv",
-        fred_path="hdfs://namenode:9000/opt/data/fred/fred_macro.csv",
+        commodity_path=COMMODITY_RAW,
+        fred_path=FRED_RAW,
     )
 
     # Save features for reuse

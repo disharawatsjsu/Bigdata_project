@@ -38,11 +38,7 @@ def _kafka_bootstrap() -> str:
 KAFKA_BROKER = _kafka_bootstrap()
 TOPIC = "gdelt-events-raw"
 
-LOCAL_MODE = not os.environ.get("HADOOP_CONF_DIR")
-HDFS_MODEL = (
-    "/opt/data/model_rf_v1" if LOCAL_MODE
-    else "hdfs://namenode:9000/supply-chain/model_rf_v1"
-)
+from config import HDFS_MODEL, LOCAL_MODE
 OUTPUT_PATH = (
     "/opt/data/streaming_output" if LOCAL_MODE
     else "hdfs://namenode:9000/supply-chain/streaming_output"
