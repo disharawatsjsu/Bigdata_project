@@ -42,6 +42,7 @@ spark = (
 spark.sparkContext.setLogLevel("WARN")
 
 from config import HDFS_FEATURES
+from schemas import validate_features
 
 FEATURES_PATH = HDFS_FEATURES
 
@@ -204,6 +205,7 @@ def ablation_study(region_scores):
 
     # Load features from pipeline
     features = spark.read.parquet(FEATURES_PATH)
+    validate_features(features)
     features = features.na.drop(subset=["label"])
 
     # Base feature columns (same as spark_pipeline.py)
