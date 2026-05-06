@@ -57,6 +57,7 @@ from config import (
     WARM_COLUMNS,
     get_tier_for_date,
 )
+from schemas import validate_features, validate_hot, validate_warm
 
 if LOCAL_MODE:
     print("⚠ Running in LOCAL mode (no HDFS)")
@@ -209,6 +210,7 @@ def ingest_gdelt_tiered(input_path: str, year: int, month: int, as_of=None):
     if tier == "hot":
         out_path = f"{HDFS_HOT}/year={year}/month={month:02d}"
         cnt = df.count()
+        validate_hot(df)
         df.write.mode("overwrite").parquet(out_path)
         print(f"[ingest_tiered] HOT: wrote {cnt:,} rows to {out_path}")
         return cnt, "hot"
@@ -218,6 +220,7 @@ def ingest_gdelt_tiered(input_path: str, year: int, month: int, as_of=None):
             f"[ingest_gdelt_tiered] WARNING: tier=cold for {year}-{month:02d}; "
             f"using warm-tier path until PR L adds cold aggregates"
         )
+        # TODO(PR-L): validate_cold(...) once cold-tier Parquet writes land here.
 
     cameo_filter = F.col("EventRootCode").cast("int").isin(SUPPLY_CHAIN_CAMEO)
     warm_df = (
@@ -227,6 +230,7 @@ def ingest_gdelt_tiered(input_path: str, year: int, month: int, as_of=None):
     )
     out_path = f"{HDFS_WARM}/year={year}/month={month:02d}"
     cnt = warm_df.count()
+    validate_warm(warm_df)
     warm_df.write.mode("overwrite").parquet(out_path)
     print(
         f"[ingest_tiered] WARM: wrote {cnt:,} rows to {out_path} "
@@ -526,6 +530,7 @@ def build_features(events_df, commodity_path: str, fred_path: str):
     print(f"  Label distribution:")
     features.groupBy("label").count().orderBy("label").show()
 
+    validate_features(features)
     return features
 
 
@@ -537,6 +542,8 @@ def train_model(features_df, model_path: str):
     print(f"\n{'='*60}")
     print("STEP 4: ML Training (Random Forest)")
     print(f"{'='*60}")
+
+    validate_features(features_df)
 
     # --- Feature columns ---
     feature_cols = [
@@ -665,6 +672,7 @@ if __name__ == "__main__":
 
     # Save features for reuse
     features_df.cache()
+    validate_features(features_df)
     features_df.write.mode("overwrite").parquet(HDFS_FEATURES)
     print(f"\nFeatures saved to {HDFS_FEATURES}")
 
