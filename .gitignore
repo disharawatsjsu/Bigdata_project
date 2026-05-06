@@ -1,0 +1,14 @@
+.env
+
+# OS / editor noise
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Data (do not commit)
+data/
+*.parquet
+*.csv
