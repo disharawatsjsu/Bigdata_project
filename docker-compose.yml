@@ -142,8 +142,8 @@ services:
     container_name: kafka
     restart: always
     ports:
-      # Host port defaults to 29092 to avoid clashing with other stacks on 9092.
-      - "${KAFKA_HOST_PORT:-29092}:9092"
+      # Host port defaults to 39092 to avoid clashing with other stacks (9092, 29092).
+      - "${KAFKA_HOST_PORT:-39092}:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
