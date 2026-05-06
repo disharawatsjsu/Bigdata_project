@@ -53,6 +53,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS gdelt_events (
 )
 PARTITIONED BY (year INT, month INT)
 STORED AS PARQUET
+-- Hive LOCATION must be HDFS URI; not config-driven
 LOCATION 'hdfs://namenode:9000/supply-chain/gdelt_events';
 
 -- Auto-discover partitions from HDFS directory structure
@@ -87,6 +88,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS features (
     label               INT
 )
 STORED AS PARQUET
+-- Hive LOCATION must be HDFS URI; not config-driven
 LOCATION 'hdfs://namenode:9000/supply-chain/features';
 """
 
