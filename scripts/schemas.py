@@ -166,6 +166,12 @@ FEATURES_SCHEMA = StructType(
     ]
 )
 
+# ---- TRAINING_READY schema ----
+# FEATURES + split column used for time-based train/val/test partitioning.
+TRAINING_READY_SCHEMA = StructType(
+    [*FEATURES_SCHEMA.fields, StructField("split", StringType(), False)]
+)
+
 
 class SchemaValidationError(Exception):
     """Raised when a DataFrame doesn't match its expected schema."""
@@ -243,3 +249,8 @@ def validate_cold(df: DataFrame) -> None:
 def validate_features(df: DataFrame) -> None:
     # strict=False: EDA / debugging may add scratch columns
     validate_schema(df, FEATURES_SCHEMA, name="features", strict=False)
+
+
+def validate_training_ready(df: DataFrame) -> None:
+    # strict=False: allow extra columns during experimentation; require at least FEATURES + split.
+    validate_schema(df, TRAINING_READY_SCHEMA, name="training_ready", strict=False)
