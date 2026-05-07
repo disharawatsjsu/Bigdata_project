@@ -102,6 +102,7 @@ services:
       HADOOP_CONF_DIR: /opt/hadoop-conf
     volumes:
       - ./config/core-site.xml:/opt/hadoop-conf/core-site.xml
+      - ./data:/opt/data
     depends_on:
       - spark-master
     networks:
@@ -122,6 +123,7 @@ services:
       HADOOP_CONF_DIR: /opt/hadoop-conf
     volumes:
       - ./config/core-site.xml:/opt/hadoop-conf/core-site.xml
+      - ./data:/opt/data
     depends_on:
       - spark-master
     networks:
@@ -239,7 +241,9 @@ services:
       - scnet
 
   airflow-webserver:
-    image: apache/airflow:2.10.3
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
     container_name: airflow-webserver
     restart: always
     depends_on:
@@ -256,12 +260,16 @@ services:
       - ./dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
       - airflow_logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/opt/data
     command: webserver
     networks:
       - scnet
 
   airflow-scheduler:
-    image: apache/airflow:2.10.3
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
     container_name: airflow-scheduler
     restart: always
     depends_on:
@@ -275,6 +283,8 @@ services:
       - ./dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
       - airflow_logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/opt/data
     command: scheduler
     networks:
       - scnet
