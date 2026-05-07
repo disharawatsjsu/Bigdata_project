@@ -7,8 +7,8 @@ provides validate_schema() for runtime enforcement at read/write boundaries.
 Schemas are versioned. Bumping a version is a breaking change — coordinate
 across the team before doing it.
 
-Source of truth for HOT/WARM field types: scripts/spark_pipeline.py (GDELT_SCHEMA,
-WARM_COLUMNS projection, build_features). Keep in sync when those change.
+Source of truth for HOT/WARM field types: scripts/pipeline_ingest.py (GDELT_SCHEMA),
+config (WARM_COLUMNS), pipeline_features (build_features output). Keep in sync when those change.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ FEATURES_SCHEMA_VERSION = 1
 
 # ---- HOT tier schema ----
 # Full GDELT v1 schema preserved verbatim during ingest, plus event_date added
-# in ingest_gdelt_tiered before write. Mirrors GDELT_SCHEMA in spark_pipeline.py.
+# in ingest_gdelt_tiered before write. Mirrors GDELT_SCHEMA in pipeline_ingest.py.
 # All GDELT fields nullable=True; event_date nullable=False (parsed from SQLDATE).
 HOT_SCHEMA = StructType(
     [
