@@ -31,7 +31,7 @@ def main() -> int:
     # Force a local filesystem read for the host-mounted /opt/data/gdelt files.
     input_csv = f"file://{local_csv}" if local_csv.startswith("/") else local_csv
 
-    cnt, tier = ingest_gdelt_tiered(input_csv, d.year, d.month)
+    cnt, tier = ingest_gdelt_tiered(input_csv, d.year, d.month, day=d.day)
     print(f"[run_tiered_ingest] Ingested {cnt:,} rows -> {tier} tier (day {args.date})")
     spark.stop()
     return 0
