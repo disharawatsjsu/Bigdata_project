@@ -167,15 +167,24 @@ def ingest_gdelt(raw_path: str, parquet_path: str):
     return raw_df
 
 
-def ingest_gdelt_tiered(input_path: str, year: int, month: int, as_of=None):
-    """Ingest one month of GDELT CSVs, routing to hot or warm tier by rolling window.
+def ingest_gdelt_tiered(
+    input_path: str,
+    year: int,
+    month: int,
+    day: int | None = None,
+    as_of=None,
+):
+    """Ingest GDELT CSVs, routing to hot or warm tier by rolling window.
 
     Hot: representative month start falls in hot window relative to as_of (full schema).
     Warm / cold: same write path and projection as warm (cold logged until PR L).
 
     Returns (row_count, tier_name) for logging.
     """
-    print(f"[ingest_tiered] reading {input_path} for {year}-{month:02d}")
+    if day is None:
+        print(f"[ingest_tiered] reading {input_path} for {year}-{month:02d}")
+    else:
+        print(f"[ingest_tiered] reading {input_path} for {year}-{month:02d}-{day:02d}")
 
     rep_date = date(year, month, 1)
     tier = get_tier_for_date(rep_date, as_of=as_of)
@@ -197,7 +206,10 @@ def ingest_gdelt_tiered(input_path: str, year: int, month: int, as_of=None):
     )
 
     if tier == "hot":
-        out_path = f"{HDFS_HOT}/year={year}/month={month:02d}"
+        if day is None:
+            out_path = f"{HDFS_HOT}/year={year}/month={month:02d}"
+        else:
+            out_path = f"{HDFS_HOT}/year={year}/month={month:02d}/day={day:02d}"
         cnt = df.count()
         validate_hot(df)
         df.write.mode("overwrite").parquet(out_path)
@@ -217,7 +229,10 @@ def ingest_gdelt_tiered(input_path: str, year: int, month: int, as_of=None):
         .filter(_in_any_chokepoint_bbox(F.col("ActionGeo_Lat"), F.col("ActionGeo_Long")))
         .select(*WARM_COLUMNS)
     )
-    out_path = f"{HDFS_WARM}/year={year}/month={month:02d}"
+    if day is None:
+        out_path = f"{HDFS_WARM}/year={year}/month={month:02d}"
+    else:
+        out_path = f"{HDFS_WARM}/year={year}/month={month:02d}/day={day:02d}"
     cnt = warm_df.count()
     validate_warm(warm_df)
     warm_df.write.mode("overwrite").parquet(out_path)
