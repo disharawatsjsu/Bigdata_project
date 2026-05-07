@@ -47,6 +47,39 @@ else:
     HDFS_COLD = f"{HDFS_BASE}/raw/cold"
     HDFS_MODEL = f"{HDFS_BASE}/model_rf_v1"
 
+# ---- Model registry (PR O writes, PR S reads) ----
+# Models are versioned by training timestamp. CURRENT pointer is a text
+# file at {MODEL_REGISTRY_BASE}/{commodity}/CURRENT containing the
+# timestamp of the active model.
+MODEL_REGISTRY_BASE = f"{HDFS_BASE}/models" if not LOCAL_MODE else "/opt/data/models"
+
+# ---- ML output artifacts (PR O writes, PR U reads) ----
+METRICS_BASE = f"{HDFS_BASE}/model_metrics" if not LOCAL_MODE else "/opt/data/parquet/model_metrics"
+PREDICTIONS_BASE = f"{HDFS_BASE}/predictions" if not LOCAL_MODE else "/opt/data/parquet/predictions"
+ATTRIBUTION_BASE = f"{HDFS_BASE}/attribution" if not LOCAL_MODE else "/opt/data/parquet/attribution"
+
+
+def get_model_registry_path(commodity: str, timestamp: str | None = None) -> str:
+    """Return the registry path for a commodity's model.
+
+    If timestamp is provided, returns the versioned path. Otherwise
+    returns the base directory.
+    """
+    base = f"{MODEL_REGISTRY_BASE}/{commodity}"
+    if timestamp is None:
+        return base
+    return f"{base}/{timestamp}"
+
+
+def get_current_model_pointer_path(commodity: str) -> str:
+    """Return the path to the CURRENT pointer file for a commodity.
+
+    The file contains the timestamp of the currently-active model.
+    Updated atomically at the end of each training run.
+    """
+    return f"{MODEL_REGISTRY_BASE}/{commodity}/CURRENT"
+
+
 # DEPRECATED: replaced by get_tier_for_date(). Kept temporarily for backward compat.
 # Remove once all callers have migrated.
 HOT_YEAR_CUTOFF = 2023
