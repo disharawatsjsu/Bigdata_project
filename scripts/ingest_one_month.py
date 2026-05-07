@@ -9,7 +9,8 @@ Usage:
 import argparse
 import sys
 
-from spark_pipeline import ingest_gdelt_tiered, spark
+# Spark: pipeline_ingest creates the shared SparkSession via getOrCreate() (same process as spark-submit).
+from pipeline_ingest import ingest_gdelt_tiered, spark
 
 
 def main():
