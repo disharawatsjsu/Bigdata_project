@@ -291,8 +291,8 @@ with DAG(
         "owner": "sc-intel",
     },
     params={
-        "start_date": Param((date.today() - timedelta(days=30)).isoformat(), type="string", format="date"),
-        "end_date": Param(date.today().isoformat(), type="string", format="date"),
+        "start_date": Param("2024-01-01", type="string", format="date"),
+        "end_date": Param("2024-01-31", type="string", format="date"),
         "chunk_days": Param(
             30,
             type="integer",

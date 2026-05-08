@@ -9,8 +9,8 @@ Why this exists (vs downloading inside the ingest DAG):
 
 Example:
   python scripts/bulk_download_gdelt.py \
-      --start <START_DATE> \
-      --end <END_DATE> \
+      --start 2018-01-01 \
+      --end 2020-12-31 \
       --output /opt/data/gdelt \
       --concurrency 12
 """

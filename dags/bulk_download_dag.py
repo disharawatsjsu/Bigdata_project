@@ -12,7 +12,7 @@ Note: This DAG only downloads to the shared local mount (/opt/data/gdelt). It do
 from __future__ import annotations
 
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 sys.path.insert(0, "/opt/airflow/scripts")
 
@@ -61,8 +61,8 @@ with DAG(
     catchup=False,
     is_paused_upon_creation=True,
     params={
-        "start_date": Param((date.today() - timedelta(days=30)).isoformat(), type="string", format="date"),
-        "end_date": Param(date.today().isoformat(), type="string", format="date"),
+        "start_date": Param("2018-01-01", type="string", format="date"),
+        "end_date": Param("2020-12-31", type="string", format="date"),
         "concurrency": Param(12, type="integer"),
     },
     tags=["download", "backfill"],

@@ -1,11 +1,13 @@
 """
-Feature engineering refresh (baseline v1).
+Create ML training-ready dataset from baseline features.
 
-After historical_backfill_dag ingests GDELT to HDFS hot/warm tiers, this DAG runs a
-single Spark job to build training-ready features and writes:
+This DAG runs a single Spark job that reads:
   {HDFS_BASE}/features/baseline/
 
-Manual trigger only for tonight's pipeline; schedule can be added later.
+and writes:
+  {HDFS_BASE}/features/training_ready/
+
+Manual trigger only for tonight's pipeline; scheduling/chaining can be added later.
 """
 
 from __future__ import annotations
@@ -22,9 +24,7 @@ from airflow.operators.python import PythonOperator
 
 from config import HDFS_BASE
 
-# Airflow containers do not set HADOOP_CONF_DIR, so config.LOCAL_MODE would resolve to True
-# if we imported HDFS_FEATURES directly. For validation we always want the HDFS path.
-FEATURES_HDFS = f"{HDFS_BASE}/features/baseline"
+TRAINING_READY_HDFS = f"{HDFS_BASE}/features/training_ready"
 
 
 def _docker_run(args: list[str], *, check: bool = False) -> subprocess.CompletedProcess:
@@ -36,21 +36,21 @@ def _docker_run(args: list[str], *, check: bool = False) -> subprocess.Completed
     )
 
 
-def validate_features_output() -> None:
-    proc = _docker_run(["exec", "namenode", "hdfs", "dfs", "-du", "-s", FEATURES_HDFS])
+def validate_training_ready_output() -> None:
+    proc = _docker_run(["exec", "namenode", "hdfs", "dfs", "-du", "-s", TRAINING_READY_HDFS])
     if proc.returncode != 0 or not proc.stdout.strip():
         raise RuntimeError(
-            f"Features output missing or unreadable: {FEATURES_HDFS}\n{proc.stderr}"
+            f"training_ready output missing or unreadable: {TRAINING_READY_HDFS}\n{proc.stderr}"
         )
     size = int(proc.stdout.strip().split("\n")[0].split()[0])
     if size <= 0:
-        raise RuntimeError(f"Features output has size 0: {FEATURES_HDFS}")
-    print(f"[feature_refresh] OK: {FEATURES_HDFS} size={size} bytes")
+        raise RuntimeError(f"training_ready output has size 0: {TRAINING_READY_HDFS}")
+    print(f"[training_ready] OK: {TRAINING_READY_HDFS} size={size} bytes")
 
 
 with DAG(
-    dag_id="feature_refresh_dag",
-    description="Build baseline training features from tiered GDELT data",
+    dag_id="training_ready_dag",
+    description="Transform baseline features into training_ready with time splits",
     schedule=None,
     start_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
     catchup=False,
@@ -62,22 +62,22 @@ with DAG(
         "retry_exponential_backoff": True,
         "max_retry_delay": timedelta(minutes=10),
     },
-    tags=["features"],
+    tags=["features", "ml"],
 ) as dag:
-    refresh_features = BashOperator(
-        task_id="refresh_features",
+    build_training_ready = BashOperator(
+        task_id="build_training_ready",
         bash_command="""
 set -e
 docker exec spark-master /opt/spark/bin/spark-submit \
   --master spark://spark-master:7077 \
-  /opt/scripts/run_feature_refresh.py
+  /opt/scripts/run_training_ready.py
 """,
     )
 
     validate_output = PythonOperator(
         task_id="validate_output",
-        python_callable=validate_features_output,
+        python_callable=validate_training_ready_output,
     )
 
-    refresh_features >> validate_output
+    build_training_ready >> validate_output
 

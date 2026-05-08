@@ -46,7 +46,7 @@ def _docker_run(args: list[str], *, check: bool = False) -> subprocess.Completed
 
 
 def check_not_already_ingested() -> str:
-    """Skip the rest of the DAG if the hot-tier day partition already has data."""
+    """Skip the rest of the DAG if the hot-tier month partition already has data."""
     from airflow.operators.python import get_current_context
 
     ctx = get_current_context()
@@ -54,8 +54,8 @@ def check_not_already_ingested() -> str:
     if hasattr(logical, "in_timezone"):
         logical = logical.in_timezone("UTC")
     target = (logical - timedelta(days=2)).date()
-    year, month, day = target.year, target.month, target.day
-    partition = f"{HDFS_HOT_HDFS}/year={year}/month={month:02d}/day={day:02d}"
+    year, month = target.year, target.month
+    partition = f"{HDFS_HOT_HDFS}/year={year}/month={month:02d}"
 
     proc = _docker_run(
         ["exec", "namenode", "hdfs", "dfs", "-du", "-s", partition],
@@ -75,7 +75,6 @@ def check_not_already_ingested() -> str:
     ctx["ti"].xcom_push(key="target_date", value=target_str)
     ctx["ti"].xcom_push(key="target_year", value=year)
     ctx["ti"].xcom_push(key="target_month", value=month)
-    ctx["ti"].xcom_push(key="target_day", value=day)
     return target_str
 
 
@@ -111,10 +110,7 @@ def validate_partition() -> None:
     ti = ctx["ti"]
     year = ti.xcom_pull(task_ids="check_not_already_ingested", key="target_year")
     month = ti.xcom_pull(task_ids="check_not_already_ingested", key="target_month")
-    day = ti.xcom_pull(task_ids="check_not_already_ingested", key="target_day")
-    partition = (
-        f"{HDFS_HOT_HDFS}/year={year}/month={int(month):02d}/day={int(day):02d}"
-    )
+    partition = f"{HDFS_HOT_HDFS}/year={year}/month={int(month):02d}"
 
     proc = _docker_run(
         ["exec", "namenode", "hdfs", "dfs", "-du", "-s", partition],

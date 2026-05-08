@@ -161,6 +161,12 @@ FEATURES_SCHEMA = StructType(
     ]
 )
 
+# ---- TRAINING_READY schema ----
+# FEATURES + split column used for time-based train/val/test partitioning.
+TRAINING_READY_SCHEMA = StructType(
+    [*FEATURES_SCHEMA.fields, StructField("split", StringType(), False)]
+)
+
 
 class SchemaValidationError(Exception):
     """Raised when a DataFrame doesn't match its expected schema."""
@@ -236,31 +242,10 @@ def validate_cold(df: DataFrame) -> None:
 
 
 def validate_features(df: DataFrame) -> None:
-    expected_gdelt = {
-        f"{chokepoint}_{field}_{window}d"
-        for chokepoint in CHOKEPOINTS
-        for window in GDELT_WINDOWS
-        for field in GDELT_BASE_FIELDS
-    }
-    required = {
-        "event_date",
-        "volatility_20d",
-        *MACRO_FIELDS,
-        *TARGET_FIELDS,
-        "label",
-        *expected_gdelt,
-    }
-    missing = sorted(required - set(df.columns))
-    if missing:
-        raise SchemaValidationError(f"Schema validation failed for features:\n  missing columns: {missing}")
+    # strict=False: EDA / debugging may add scratch columns
+    validate_schema(df, FEATURES_SCHEMA, name="features", strict=False)
 
-    extra = sorted(set(df.columns) - required)
-    if extra:
-        raise SchemaValidationError(f"Schema validation failed for features:\n  unexpected extra columns: {extra}")
 
-    if len([col_name for col_name in df.columns if col_name in expected_gdelt]) != 96:
-        raise SchemaValidationError("Schema validation failed for features:\n  expected exactly 96 GDELT columns")
-
-    if len(df.columns) != 106:
-        raise SchemaValidationError("Schema validation failed for features:\n  expected exactly 106 total columns")
-
+def validate_training_ready(df: DataFrame) -> None:
+    # strict=False: allow extra columns during experimentation; require at least FEATURES + split.
+    validate_schema(df, TRAINING_READY_SCHEMA, name="training_ready", strict=False)
