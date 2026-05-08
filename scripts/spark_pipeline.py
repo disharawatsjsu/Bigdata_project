@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
-"""
-Supply Chain Disruption Intelligence — Spark Pipeline (V1)
+"""Legacy Spark entrypoint for ingest + baseline feature generation."""
 
-Runs end-to-end: GDELT ingestion → cleaning → feature engineering → ML training.
-Designed to run inside the spark-master container with:
-    spark-submit --master spark://spark-master:7077 spark_pipeline.py
-
-Pipeline stages live in pipeline_ingest, pipeline_features, and pipeline_train.
-
-V1 scope: single-commodity (crude_oil), single-region (Strait of Hormuz + Red Sea)
-to prove the pipeline works before scaling.
-"""
+import json
 
 from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
 
 # Canonical entrypoint: create Spark first; pipeline modules use getOrCreate() and share this session.
 spark = (
@@ -32,13 +22,25 @@ from config import (
     GDELT_RAW,
     HDFS_FEATURES,
     HDFS_GDELT_PARQUET,
-    HDFS_MODEL,
     LOCAL_MODE,
 )
 from schemas import validate_features
 from pipeline_ingest import ingest_gdelt
-from pipeline_features import clean_and_filter, build_features
-from pipeline_train import train_model
+from pipeline_features import clean_and_filter, build_features, summarize_features
+
+
+def _write_text(path: str, content: str) -> None:
+    hadoop_conf = spark.sparkContext._jsc.hadoopConfiguration()
+    jvm = spark.sparkContext._jvm
+    fs = jvm.org.apache.hadoop.fs.FileSystem.get(jvm.java.net.URI.create(path), hadoop_conf)
+    hdfs_path = jvm.org.apache.hadoop.fs.Path(path)
+    if fs.exists(hdfs_path):
+        fs.delete(hdfs_path, True)
+    stream = fs.create(hdfs_path, True)
+    try:
+        stream.write(bytearray(content.encode("utf-8")))
+    finally:
+        stream.close()
 
 if LOCAL_MODE:
     print("⚠ Running in LOCAL mode (no HDFS)")
@@ -49,22 +51,23 @@ if __name__ == "__main__":
 
     clean_df = clean_and_filter(HDFS_GDELT_PARQUET)
 
-    features_df = build_features(
+    commodity_features = build_features(
         clean_df,
         commodity_path=COMMODITY_RAW,
         fred_path=FRED_RAW,
     )
 
-    features_df.cache()
-    validate_features(features_df)
-    features_df.write.mode("overwrite").parquet(HDFS_FEATURES)
-    print(f"\nFeatures saved to {HDFS_FEATURES}")
-
-    features_df = features_df.filter(F.col("event_date") >= "2024-01-01")
-    model = train_model(features_df, HDFS_MODEL)
+    for commodity, (features_df, threshold, train_end_date) in commodity_features.items():
+        features_df.cache()
+        validate_features(features_df)
+        out_path = f"{HDFS_FEATURES}/baseline/{commodity}"
+        features_df.write.mode("overwrite").parquet(out_path)
+        summary = summarize_features(commodity, features_df, threshold, train_end_date)
+        _write_text(f"{out_path}/_summary.json", json.dumps(summary, indent=2, sort_keys=True))
+        print(f"\nFeatures saved to {out_path}: rows={features_df.count():,}")
 
     print("\n" + "=" * 60)
-    print("PIPELINE COMPLETE — V1 vertical slice done.")
+    print("PIPELINE COMPLETE — baseline features written.")
     print("=" * 60)
 
     spark.stop()

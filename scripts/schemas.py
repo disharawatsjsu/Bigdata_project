@@ -30,6 +30,11 @@ HOT_SCHEMA_VERSION = 1
 WARM_SCHEMA_VERSION = 1
 COLD_SCHEMA_VERSION = 1
 FEATURES_SCHEMA_VERSION = 1
+CHOKEPOINTS = ("hormuz", "suez", "red_sea", "black_sea", "malacca", "panama", "taiwan", "chile")
+GDELT_BASE_FIELDS = ("event_sum", "goldstein_mean", "tone_mean")
+GDELT_WINDOWS = (7, 14, 30, 90)
+MACRO_FIELDS = ("treasury_10y", "usd_index", "vix")
+TARGET_FIELDS = ("return_5d_fwd", "return_20d_fwd", "abs_return_5d_fwd", "abs_return_20d_fwd")
 
 # ---- HOT tier schema ----
 # Full GDELT v1 schema preserved verbatim during ingest, plus event_date added
@@ -111,6 +116,7 @@ WARM_SCHEMA = StructType(
         StructField("EventRootCode", StringType(), True),
         StructField("GoldsteinScale", FloatType(), True),
         StructField("NumMentions", IntegerType(), True),
+        StructField("NumSources", IntegerType(), True),
         StructField("AvgTone", FloatType(), True),
         StructField("ActionGeo_Lat", FloatType(), True),
         StructField("ActionGeo_Long", FloatType(), True),
@@ -136,33 +142,22 @@ COLD_SCHEMA = StructType(
 )
 
 # ---- FEATURES schema ----
-# Output of build_features(): daily GDELT aggregates × oil returns/vol/label × FRED.
-# Types follow Spark SQL: count→long, avg/sum windows on long→double, etc.
+# Output of build_features(): one row per event_date, with chokepoint-prefixed
+# rolling GDELT columns, macro features, commodity volatility, regression
+# targets, and a legacy binary label. Total columns: 106.
 FEATURES_SCHEMA = StructType(
     [
         StructField("event_date", DateType(), True),
-        StructField("chokepoint", StringType(), True),
-        StructField("event_count", LongType(), True),
-        StructField("avg_goldstein", DoubleType(), True),
-        StructField("avg_tone", DoubleType(), True),
-        StructField("total_mentions", LongType(), True),
-        StructField("conflict_ratio", DoubleType(), True),
-        StructField("event_count_7d", DoubleType(), True),
-        StructField("event_count_30d", DoubleType(), True),
-        StructField("avg_goldstein_7d", DoubleType(), True),
-        StructField("avg_goldstein_30d", DoubleType(), True),
-        StructField("avg_tone_7d", DoubleType(), True),
-        StructField("avg_tone_30d", DoubleType(), True),
-        StructField("total_mentions_7d", DoubleType(), True),
-        StructField("total_mentions_30d", DoubleType(), True),
-        StructField("conflict_ratio_7d", DoubleType(), True),
-        StructField("conflict_ratio_30d", DoubleType(), True),
-        StructField("return_5d", DoubleType(), True),
-        StructField("return_20d", DoubleType(), True),
+        *[
+            StructField(f"{chokepoint}_{field}_{window}d", DoubleType(), True)
+            for chokepoint in CHOKEPOINTS
+            for window in GDELT_WINDOWS
+            for field in GDELT_BASE_FIELDS
+        ],
+        *[StructField(field, DoubleType(), True) for field in MACRO_FIELDS],
         StructField("volatility_20d", DoubleType(), True),
+        *[StructField(field, DoubleType(), True) for field in TARGET_FIELDS],
         StructField("label", IntegerType(), True),
-        StructField("treasury_10y", DoubleType(), True),
-        StructField("usd_index", DoubleType(), True),
     ]
 )
 

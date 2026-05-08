@@ -4,8 +4,7 @@ Download GDELT Events 2.0 daily files for a date range.
 Files are tab-delimited CSVs compressed as .zip.
 
 Usage:
-    python download_gdelt.py --start 2023-01-01 --end 2023-12-31 --output ./data/gdelt
-    python download_gdelt.py --start 2024-01-01 --end 2024-06-30 --output ./data/gdelt
+    python download_gdelt.py --start <START_DATE> --end <END_DATE> --output ./data/gdelt
 
 Resumes automatically — skips files already downloaded.
 """
