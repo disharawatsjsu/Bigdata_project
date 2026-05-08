@@ -330,7 +330,7 @@ def shap_bars(chokepoint: str, target: str) -> dcc.Graph:
     if subset.empty:
         return dcc.Graph(figure=empty_fig(f"No {target} attribution", 180), config={"displayModeBar": False})
     subset = subset.sort_values("mean_abs_shap", ascending=True)
-    fig = go.Figure(go.Bar(x=subset["mean_abs_shap"], y=subset["commodity"], orientation="h", marker={"color": ACCENT}, text=subset["mean_abs_shap"].map(lambda v: f"{v:.3f}"), textposition="outside"))
+    fig = go.Figure(go.Bar(x=subset["mean_abs_shap"], y=subset["commodity"], orientation="h", marker={"color": ACCENT}))
     fig.update_layout(template="plotly_dark", height=180, margin={"l": 70, "r": 40, "t": 22, "b": 20}, title=f"{target} horizon", paper_bgcolor=PANEL, plot_bgcolor=PANEL, font={"family": FONT_MONO, "color": TEXT}, showlegend=False)
     fig.update_xaxes(showgrid=False, zeroline=False)
     fig.update_yaxes(showgrid=False)
@@ -419,7 +419,7 @@ def detail_subpanel(chokepoint: str, window_key: str, custom_date: str | None) -
                 ],
                 className="metrics-block",
             ),
-            html.Div("Model-learned sector exposure from this chokepoint", className="block-title"),
+            html.Div("Sector volatility outlook from this chokepoint", className="block-title"),
             html.Div([shap_bars(chokepoint, "5d"), shap_bars(chokepoint, "20d")], className="two-mini-charts"),
             top_features(chokepoint),
         ],
