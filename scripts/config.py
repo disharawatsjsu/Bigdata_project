@@ -58,6 +58,16 @@ METRICS_BASE = f"{HDFS_BASE}/model_metrics" if not LOCAL_MODE else "/opt/data/pa
 PREDICTIONS_BASE = f"{HDFS_BASE}/predictions" if not LOCAL_MODE else "/opt/data/parquet/predictions"
 ATTRIBUTION_BASE = f"{HDFS_BASE}/attribution" if not LOCAL_MODE else "/opt/data/parquet/attribution"
 
+# ---- Feature-label training cutoff ----
+# If TRAIN_END_DATE is unset, pipeline_features defaults to max(event_date) minus this many days.
+TRAIN_END_DATE_ENV = "TRAIN_END_DATE"
+DEFAULT_TRAIN_END_LOOKBACK_DAYS = int(os.environ.get("DEFAULT_TRAIN_END_LOOKBACK_DAYS", "90"))
+
+# ---- Feature engineering contract ----
+# Rolling GDELT windows are trailing calendar-day windows ending on event_date.
+WINDOWS = [7, 14, 30, 90]
+BASE_METRICS = ["event_sum", "goldstein_mean", "tone_mean"]
+
 
 def get_model_registry_path(commodity: str, timestamp: str | None = None) -> str:
     """Return the registry path for a commodity's model.
@@ -157,6 +167,7 @@ WARM_COLUMNS = [
     "EventRootCode",
     "GoldsteinScale",
     "NumMentions",
+    "NumSources",
     "AvgTone",
     "ActionGeo_Lat",
     "ActionGeo_Long",

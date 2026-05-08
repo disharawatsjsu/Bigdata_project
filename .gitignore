@@ -7,8 +7,23 @@
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Data (do not commit)
 data/
 *.parquet
 *.csv
+
+# Local dashboard/runtime installs
+.dashboard_runtime_deps/
+.dashboard_smoke_deps/
+
+# Notebook/runtime noise
+.ipynb_checkpoints/
+
+# Logs and temporary outputs
+*.log
+tmp/
+temp/

@@ -4,4 +4,14 @@
     <name>fs.defaultFS</name>
     <value>hdfs://namenode:9000</value>
   </property>
+
+  <!-- Allow HttpFS (runs as user 'hadoop' in the apache/hadoop image) to proxy as requested users. -->
+  <property>
+    <name>hadoop.proxyuser.hadoop.hosts</name>
+    <value>*</value>
+  </property>
+  <property>
+    <name>hadoop.proxyuser.hadoop.groups</name>
+    <value>*</value>
+  </property>
 </configuration>

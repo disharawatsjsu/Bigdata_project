@@ -3,7 +3,7 @@
 Download commodity futures prices (Yahoo Finance) and FRED macro indicators.
 
 Usage:
-    python download_markets.py --start 2015-01-01 --end 2024-12-31 --output ./data
+    python download_markets.py --start <START_DATE> --end <END_DATE> --output ./data
 
 Outputs:
     ./data/commodities/commodity_prices.csv
@@ -11,26 +11,30 @@ Outputs:
 """
 
 import argparse
+import os
+from datetime import date, timedelta
+from io import StringIO
 from pathlib import Path
 
 import yfinance as yf
 import pandas as pd
+import requests
 
 # --- Commodity symbols ---
 COMMODITIES = {
-    "CL=F": "crude_oil",
-    "ZW=F": "wheat",
+    "BZ=F": "brent",
+    "CL=F": "wti",
     "HG=F": "copper",
-    "NG=F": "natural_gas",
-    "KC=F": "coffee",
     "GC=F": "gold",
+    "ZW=F": "wheat",
+    "ZS=F": "soybeans",
 }
 
 # --- FRED series (downloaded via public CSV endpoint, no API key needed) ---
 FRED_SERIES = {
     "DGS10": "treasury_10y",          # 10-year Treasury yield
     "DTWEXBGS": "usd_index",          # Trade-weighted USD
-    "CPIAUCNS": "cpi",                # CPI (monthly)
+    "VIXCLS": "vix",                  # CBOE volatility index
 }
 
 FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
@@ -40,15 +44,19 @@ def download_commodities(start: str, end: str, output_dir: Path):
     """Pull daily OHLCV for each commodity via yfinance."""
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / "commodity_prices.csv"
+    yf_end = (date.fromisoformat(end) + timedelta(days=1)).isoformat()
 
     frames = []
     for symbol, name in COMMODITIES.items():
         print(f"  Fetching {name} ({symbol})...")
-        df = yf.download(symbol, start=start, end=end, progress=False)
+        df = yf.download(symbol, start=start, end=yf_end, progress=False)
         if df.empty:
             print(f"    WARNING: no data for {symbol}")
             continue
-        df = df[["Close"]].rename(columns={"Close": "close"})
+        close = df["Close"]
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+        df = close.rename("close").to_frame()
         df["commodity"] = name
         df["symbol"] = symbol
         df.index.name = "date"
@@ -75,7 +83,9 @@ def download_fred(start: str, end: str, output_dir: Path):
         )
         try:
             # Read without assuming column names — detect them
-            df = pd.read_csv(url)
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            df = pd.read_csv(StringIO(resp.text))
             # FRED CSVs have columns like DATE/date and SERIES_ID/series_id
             # Normalize: find the date column and the value column
             df.columns = [c.strip() for c in df.columns]
@@ -105,16 +115,27 @@ def download_fred(start: str, end: str, output_dir: Path):
 
 def main():
     parser = argparse.ArgumentParser(description="Download commodity + FRED data")
-    parser.add_argument("--start", default="2015-01-01")
-    parser.add_argument("--end", default="2024-12-31")
+    parser.add_argument("--start", default=os.environ.get("MARKET_START_DATE"))
+    parser.add_argument("--end", default=os.environ.get("MARKET_END_DATE"))
     parser.add_argument("--output", default="./data")
+    parser.add_argument(
+        "--only",
+        choices=["all", "commodities", "fred"],
+        default="all",
+        help="Limit download to commodity prices or FRED macro data.",
+    )
     args = parser.parse_args()
 
+    if not args.start or not args.end:
+        parser.error("--start/--end are required unless MARKET_START_DATE/MARKET_END_DATE are set")
+
     base = Path(args.output)
-    print("=== Commodity Prices ===")
-    download_commodities(args.start, args.end, base / "commodities")
-    print("\n=== FRED Macro Indicators ===")
-    download_fred(args.start, args.end, base / "fred")
+    if args.only in ("all", "commodities"):
+        print("=== Commodity Prices ===")
+        download_commodities(args.start, args.end, base / "commodities")
+    if args.only in ("all", "fred"):
+        print("\n=== FRED Macro Indicators ===")
+        download_fred(args.start, args.end, base / "fred")
     print("\nDone.")
 
 

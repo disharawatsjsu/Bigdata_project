@@ -20,6 +20,8 @@ from pyspark.ml import Pipeline
 from config import HDFS_FEATURES, HDFS_MODEL
 from schemas import validate_features
 
+TARGET_COLUMNS = {"return_5d_fwd", "return_20d_fwd", "abs_return_5d_fwd", "abs_return_20d_fwd"}
+
 spark = (
     SparkSession.builder.appName("SupplyChainIntel_V1")
     .config("spark.sql.parquet.compression.codec", "snappy")
@@ -38,12 +40,9 @@ def train_model(features_df, model_path: str):
     validate_features(features_df)
 
     feature_cols = [
-        "event_count_7d", "avg_goldstein_7d", "avg_tone_7d",
-        "total_mentions_7d", "conflict_ratio_7d",
-        "event_count_30d", "avg_goldstein_30d", "avg_tone_30d",
-        "total_mentions_30d", "conflict_ratio_30d",
-        "return_5d", "return_20d", "volatility_20d",
-        "treasury_10y", "usd_index",
+        col_name
+        for col_name in features_df.columns
+        if col_name not in {"event_date", "label", *TARGET_COLUMNS}
     ]
 
     assembler = VectorAssembler(inputCols=feature_cols, outputCol="features", handleInvalid="skip")

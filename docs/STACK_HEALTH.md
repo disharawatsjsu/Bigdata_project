@@ -32,3 +32,15 @@ If **39092** is still in use, set **`KAFKA_HOST_PORT`** in `.env` to a free port
 ## airflow-init
 
 **Expected** to exit with code **0** after DB migration and admin user creation. This is **not** a failure. Long-running Airflow processes are **airflow-webserver** and **airflow-scheduler**.
+
+## hdfs replication / rebalance
+
+HDFS replication is set to **1** (vs the Hadoop default 3) to reduce local disk usage during bulk historical backfills.
+
+If you change replication (or add/remove datanodes) and want to force a re-replication sweep, run:
+
+- `docker compose exec namenode hdfs dfsadmin -setrep -R -w 1 /supply-chain`
+
+Optional: run the balancer to smooth block placement:
+
+- `docker compose exec namenode hdfs balancer`

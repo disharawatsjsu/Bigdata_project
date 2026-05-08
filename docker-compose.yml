@@ -18,10 +18,14 @@ services:
       CLUSTER_NAME: supply-chain
       CORE_CONF_fs_defaultFS: hdfs://namenode:9000
       CORE_CONF_hadoop_http_staticuser_user: root
-      HDFS_CONF_dfs_replication: 2
+      # Allow HttpFS (runs as user 'hadoop') to proxy as requested users (e.g. root)
+      CORE_CONF_hadoop_proxyuser_hadoop_hosts: "*"
+      CORE_CONF_hadoop_proxyuser_hadoop_groups: "*"
+      HDFS_CONF_dfs_replication: "1"
       HDFS_CONF_dfs_namenode_datanode_registration_ip___hostname___check: "false"
     volumes:
       - namenode_data:/hadoop/dfs/name
+      - ./config/hdfs-site.xml:/etc/hadoop/hdfs-site.xml
     networks:
       - scnet
 
@@ -29,12 +33,20 @@ services:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: datanode-1
     restart: always
+    ports:
+      # WebHDFS redirect target for OPEN/CREATE (datanode web port)
+      - "${HDFS_DATANODE1_WEB_PORT:-9865}:9864"
     environment:
       CORE_CONF_fs_defaultFS: hdfs://namenode:9000
-      HDFS_CONF_dfs_replication: 2
+      CORE_CONF_hadoop_proxyuser_hadoop_hosts: "*"
+      CORE_CONF_hadoop_proxyuser_hadoop_groups: "*"
+      HDFS_CONF_dfs_replication: "1"
+      # Ensure WebHDFS redirects use stable service names
+      HDFS_CONF_dfs_datanode_hostname: datanode-1
       SERVICE_PRECONDITION: "namenode:9870"
     volumes:
       - datanode1_data:/hadoop/dfs/data
+      - ./config/hdfs-site.xml:/etc/hadoop/hdfs-site.xml
     depends_on:
       - namenode
     networks:
@@ -44,14 +56,43 @@ services:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: datanode-2
     restart: always
+    ports:
+      # WebHDFS redirect target for OPEN/CREATE (datanode web port)
+      - "${HDFS_DATANODE2_WEB_PORT:-9866}:9864"
     environment:
       CORE_CONF_fs_defaultFS: hdfs://namenode:9000
-      HDFS_CONF_dfs_replication: 2
+      CORE_CONF_hadoop_proxyuser_hadoop_hosts: "*"
+      CORE_CONF_hadoop_proxyuser_hadoop_groups: "*"
+      HDFS_CONF_dfs_replication: "1"
+      # Ensure WebHDFS redirects use stable service names
+      HDFS_CONF_dfs_datanode_hostname: datanode-2
       SERVICE_PRECONDITION: "namenode:9870"
     volumes:
       - datanode2_data:/hadoop/dfs/data
+      - ./config/hdfs-site.xml:/etc/hadoop/hdfs-site.xml
     depends_on:
       - namenode
+    networks:
+      - scnet
+
+  # --- HttpFS (single endpoint WebHDFS gateway; no datanode redirects) ---
+  httpfs:
+    image: apache/hadoop:3.3.6
+    container_name: httpfs
+    restart: always
+    ports:
+      - "${HTTPFS_PORT:-14000}:14000"
+    environment:
+      # HttpFS reads HADOOP_CONF_DIR for core-site.xml/hdfs-site.xml
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+    volumes:
+      - ./config/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./config/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+    depends_on:
+      - namenode
+      - datanode-1
+      - datanode-2
+    command: ["hdfs", "httpfs"]
     networks:
       - scnet
 
@@ -102,6 +143,7 @@ services:
       HADOOP_CONF_DIR: /opt/hadoop-conf
     volumes:
       - ./config/core-site.xml:/opt/hadoop-conf/core-site.xml
+      - ./data:/opt/data
     depends_on:
       - spark-master
     networks:
@@ -122,6 +164,7 @@ services:
       HADOOP_CONF_DIR: /opt/hadoop-conf
     volumes:
       - ./config/core-site.xml:/opt/hadoop-conf/core-site.xml
+      - ./data:/opt/data
     depends_on:
       - spark-master
     networks:
@@ -164,10 +207,14 @@ services:
       - "${HIVE_SERVER_PORT:-10000}:10000"  # HiveServer2 JDBC
       - "${HIVE_SERVER_WEBUI_PORT:-10002}:10002"  # Hive Web UI
     environment:
-      HIVE_CORE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore-db/${METASTORE_DB_NAME:-metastore}"
-      HIVE_CORE_CONF_javax_jdo_option_ConnectionDriverName: "org.postgresql.Driver"
-      HIVE_CORE_CONF_javax_jdo_option_ConnectionUserName: "${METASTORE_DB_USER:-hive}"
-      HIVE_CORE_CONF_javax_jdo_option_ConnectionPassword: "${METASTORE_DB_PASSWORD:-hive}"
+      SERVICE_NAME: hiveserver2
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore-db/${METASTORE_DB_NAME:-metastore}"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionDriverName: "org.postgresql.Driver"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionUserName: "${METASTORE_DB_USER:-hive}"
+      HIVE_SITE_CONF_javax_jdo_option_ConnectionPassword: "${METASTORE_DB_PASSWORD:-hive}"
+      HIVE_SITE_CONF_hive_server2_thrift_bind_host: "0.0.0.0"
+      HIVE_SITE_CONF_hive_server2_thrift_port: "10000"
+      HIVE_SITE_CONF_hive_server2_authentication: "NOSASL"
       CORE_CONF_fs_defaultFS: hdfs://namenode:9000
       SERVICE_PRECONDITION: "namenode:9870 hive-metastore-db:5432"
     depends_on:
@@ -239,7 +286,9 @@ services:
       - scnet
 
   airflow-webserver:
-    image: apache/airflow:2.10.3
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
     container_name: airflow-webserver
     restart: always
     depends_on:
@@ -256,12 +305,16 @@ services:
       - ./dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
       - airflow_logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/opt/data
     command: webserver
     networks:
       - scnet
 
   airflow-scheduler:
-    image: apache/airflow:2.10.3
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
     container_name: airflow-scheduler
     restart: always
     depends_on:
@@ -275,6 +328,8 @@ services:
       - ./dags:/opt/airflow/dags
       - ./scripts:/opt/airflow/scripts
       - airflow_logs:/opt/airflow/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/opt/data
     command: scheduler
     networks:
       - scnet

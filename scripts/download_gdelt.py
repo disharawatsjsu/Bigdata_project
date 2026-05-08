@@ -4,24 +4,28 @@ Download GDELT Events 2.0 daily files for a date range.
 Files are tab-delimited CSVs compressed as .zip.
 
 Usage:
-    python download_gdelt.py --start 2023-01-01 --end 2023-12-31 --output ./data/gdelt
-    python download_gdelt.py --start 2024-01-01 --end 2024-06-30 --output ./data/gdelt
+    python download_gdelt.py --start <START_DATE> --end <END_DATE> --output ./data/gdelt
 
 Resumes automatically — skips files already downloaded.
 """
 
+from __future__ import annotations
+
+import argparse
 import os
 import sys
 import time
-import argparse
 import zipfile
-import requests
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
+from typing import Iterator
+
+import requests
 
 # GDELT 2.0 Events daily export URL pattern
 # Format: YYYYMMDD.export.CSV.zip
-BASE_URL = "http://data.gdeltproject.org/events"
+GDELT_URL_TEMPLATE = "http://data.gdeltproject.org/events/{ymd}.export.CSV.zip"
 
 # Column names for GDELT Events 2.0 (58 fields)
 GDELT_EVENTS_COLUMNS = [
@@ -48,82 +52,134 @@ GDELT_EVENTS_COLUMNS = [
 ]
 
 
-def date_range(start: str, end: str):
-    """Yield dates from start to end inclusive."""
-    current = datetime.strptime(start, "%Y-%m-%d")
-    end_dt = datetime.strptime(end, "%Y-%m-%d")
-    while current <= end_dt:
-        yield current
-        current += timedelta(days=1)
+def date_range(start: date, end: date) -> Iterator[date]:
+    """Yield each date from start to end inclusive."""
+    cur = start
+    while cur <= end:
+        yield cur
+        cur += timedelta(days=1)
 
 
-def download_day(dt: datetime, output_dir: Path) -> str | None:
-    """Download and extract one day's GDELT export. Returns CSV path or None."""
-    date_str = dt.strftime("%Y%m%d")
-    zip_name = f"{date_str}.export.CSV.zip"
-    csv_name = f"{date_str}.export.CSV"
-    csv_path = output_dir / csv_name
+def download_day(target_date: date, output_dir: str | Path) -> Path:
+    """Download GDELT export for one day. Returns the path to the extracted CSV.
 
-    # Skip if already extracted
+    Idempotent: if the destination CSV already exists and is non-empty,
+    returns immediately without re-downloading.
+
+    Raises:
+        FileNotFoundError: if GDELT returns 404 (file not yet published)
+        RuntimeError: on other HTTP errors or malformed ZIP payload
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    ymd = target_date.strftime("%Y%m%d")
+    csv_path = output_dir / f"{ymd}.export.CSV"
+
     if csv_path.exists() and csv_path.stat().st_size > 0:
-        return str(csv_path)
+        return csv_path
 
-    url = f"{BASE_URL}/{zip_name}"
-    zip_path = output_dir / zip_name
+    url = GDELT_URL_TEMPLATE.format(ymd=ymd)
 
     try:
-        resp = requests.get(url, timeout=30)
+        resp = requests.get(url, timeout=60)
         if resp.status_code == 404:
-            # Some dates (weekends, holidays) may not have files
-            print(f"  {date_str}: no file (404)")
-            return None
-        resp.raise_for_status()
+            raise FileNotFoundError(
+                f"GDELT file not yet published for {target_date.isoformat()} "
+                f"(URL returned 404: {url})"
+            )
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise RuntimeError(f"HTTP error downloading {url}: {e}") from e
 
-        zip_path.write_bytes(resp.content)
+        try:
+            with zipfile.ZipFile(BytesIO(resp.content), "r") as zf:
+                csv_names = [n for n in zf.namelist() if n.endswith(".CSV")]
+                if not csv_names:
+                    raise RuntimeError(
+                        f"No .CSV file in GDELT zip for {target_date.isoformat()}"
+                    )
+                # GDELT zips contain exactly one .CSV file, but be defensive.
+                zf.extract(csv_names[0], output_dir)
+        except zipfile.BadZipFile as e:
+            raise RuntimeError(f"Bad ZIP payload from {url}: {e}") from e
 
-        # Extract
-        with zipfile.ZipFile(zip_path, 'r') as zf:
-            zf.extractall(output_dir)
+        extracted = output_dir / csv_names[0]
+        if extracted != csv_path:
+            extracted.rename(csv_path)
 
-        zip_path.unlink()  # clean up zip
-        print(f"  {date_str}: OK ({csv_path.stat().st_size / 1e6:.1f} MB)")
-        return str(csv_path)
+        return csv_path
 
+    except FileNotFoundError:
+        raise
     except Exception as e:
-        print(f"  {date_str}: FAILED — {e}")
-        if zip_path.exists():
-            zip_path.unlink()
-        return None
+        raise RuntimeError(f"Failed downloading {target_date.isoformat()}: {e}") from e
 
 
-def main():
+def download_range(
+    start: date,
+    end: date,
+    output_dir: str | Path,
+    delay_seconds: float = 0.5,
+) -> list[Path]:
+    """Download GDELT exports for a date range. Polite delay between requests.
+
+    Note: 404 (file not published) is treated as a warning and skipped.
+    """
+    paths: list[Path] = []
+    for d in date_range(start, end):
+        try:
+            paths.append(download_day(d, output_dir))
+        except FileNotFoundError as e:
+            print(f"[download_range] WARN: {e}")
+        time.sleep(delay_seconds)
+    return paths
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download GDELT Events 2.0 daily files")
     parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end", required=True, help="End date YYYY-MM-DD")
     parser.add_argument("--output", default="./data/gdelt", help="Output directory")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.5,
+        help="Seconds between requests (politeness)",
+    )
+    return parser.parse_args(argv)
 
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+
+    start = date.fromisoformat(args.start)
+    end = date.fromisoformat(args.end)
     output_dir = Path(args.output)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Downloading GDELT Events: {args.start} → {args.end}")
+    print(f"Downloading GDELT Events: {start.isoformat()} → {end.isoformat()}")
     print(f"Output: {output_dir.resolve()}\n")
 
-    success, skip, fail = 0, 0, 0
-    for dt in date_range(args.start, args.end):
-        csv_path = output_dir / f"{dt.strftime('%Y%m%d')}.export.CSV"
+    success, skip, warn = 0, 0, 0
+    for d in date_range(start, end):
+        csv_path = output_dir / f"{d.strftime('%Y%m%d')}.export.CSV"
         if csv_path.exists() and csv_path.stat().st_size > 0:
             skip += 1
             continue
-        result = download_day(dt, output_dir)
-        if result:
+        try:
+            out = download_day(d, output_dir)
+            mb = out.stat().st_size / 1e6
+            print(f"  {d.strftime('%Y%m%d')}: OK ({mb:.1f} MB)")
             success += 1
-        else:
-            fail += 1
-        time.sleep(0.5)  # be polite to GDELT servers
+        except FileNotFoundError:
+            print(f"  {d.strftime('%Y%m%d')}: no file (404)")
+            warn += 1
+        time.sleep(args.delay)  # be polite to GDELT servers
 
-    print(f"\nDone: {success} downloaded, {skip} skipped, {fail} failed")
+    print(f"\nDone: {success} downloaded, {skip} skipped, {warn} 404s")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

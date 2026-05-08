@@ -1,0 +1,10 @@
+dash
+dash-bootstrap-components
+plotly
+duckdb
+pyhive[hive]
+pandas
+pyarrow
+sasl
+thrift
+thrift-sasl

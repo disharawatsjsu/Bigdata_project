@@ -44,6 +44,17 @@ class TestSchemaContract:
         names = {f.name for f in FEATURES_SCHEMA.fields}
         assert "label" in names, "features schema must have a label column"
 
+    def test_features_schema_has_new_baseline_contract(self):
+        names = {f.name for f in FEATURES_SCHEMA.fields}
+        assert len(FEATURES_SCHEMA.fields) == 106
+        assert "hormuz_event_sum_7d" in names
+        assert "hormuz_goldstein_mean_90d" in names
+        assert "vix" in names
+        assert "return_5d_fwd" in names
+        assert "abs_return_20d_fwd" in names
+        assert "hormuz_event_count_1d" not in names
+        assert "return_5d" not in names
+
     def test_validate_passes_correct_df(self):
         schema = StructType(
             [StructField("a", IntegerType()), StructField("b", StringType())]
